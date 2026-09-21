@@ -1,23 +1,54 @@
 #!/usr/bin/env python3
-"""Ryanair price watch: Eindhoven <-> Girona. Sends a push (ntfy) on price drops."""
-import json, os, sys, traceback, urllib.request
-from datetime import date
+"""Ryanair prijswacht vanaf Eindhoven.
 
-# ---- Config (override via env vars) ----
-ORIGIN = os.getenv("ORIGIN", "EIN")
-DEST = os.getenv("DEST", "GRO")
-OUT_FROM = os.getenv("OUT_FROM", "2026-12-24")  # heenreis venster
-OUT_TO = os.getenv("OUT_TO", "2026-12-28")
-RET_FROM = os.getenv("RET_FROM", "2027-01-01")  # terugreis venster
-RET_TO = os.getenv("RET_TO", "2027-01-04")
-TARGET = float(os.getenv("TARGET_TOTAL", "0"))  # optioneel: melding als retour onder dit bedrag komt
+Haalt per watch de goedkoopste retourcombinatie op, logt alles append-only naar
+data/prices.csv, schrijft REPORT.md en stuurt alleen een ntfy-push bij een
+gebeurtenis die er toe doet.
+"""
+import csv
+import json
+import os
+import sys
+import time
+import traceback
+import urllib.request
+from datetime import date, datetime, timezone
+
+import advice
+import report
+
+# HARDE EIS: vertrekvliegveld is altijd Eindhoven. Dit is geen instelling.
+ORIGIN = "EIN"
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+CONFIG_FILE = os.path.join(ROOT, "config", "watches.json")
+PRICES_FILE = os.path.join(ROOT, "data", "prices.csv")
+STATE_FILE = os.path.join(ROOT, "state.json")
+REPORT_FILE = os.path.join(ROOT, "REPORT.md")
+
+API = ("https://services-api.ryanair.com/farfnd/v4/oneWayFares/{o}/{d}"
+       "/cheapestPerDay?outboundMonthOfDate={m}&currency=EUR")
+HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                   "AppleWebKit/537.36 Chrome/128 Safari/537.36"),
+    "Accept": "application/json",
+}
+RETRIES = 3
+RETRY_WAIT = 5
+
+COLUMNS = ["observed_at_utc", "watch_id", "leg", "origin", "dest",
+           "flight_date", "price_eur", "dep", "arr", "days_to_flight"]
+
 NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
 FORCE_NOTIFY = os.getenv("FORCE_NOTIFY", "").strip().lower() in ("1", "true", "yes", "on")
-STATE_FILE = os.getenv("STATE_FILE", "state.json")
 
-API = "https://services-api.ryanair.com/farfnd/v4/oneWayFares/{o}/{d}/cheapestPerDay?outboundMonthOfDate={m}&currency=EUR"
-HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/128 Safari/537.36",
-           "Accept": "application/json"}
+
+def guard_origin():
+    asked = os.getenv("ORIGIN", "").strip().upper()
+    if asked and asked != ORIGIN:
+        raise SystemExit(
+            f"FOUT: vertrek staat vast op {ORIGIN} (Eindhoven), gevraagd werd '{asked}'. "
+            "Dit script vertrekt nergens anders vandaan.")
 
 
 def months_between(start, end):
@@ -29,14 +60,26 @@ def months_between(start, end):
     return out
 
 
+def _get(url):
+    last = None
+    for attempt in range(1, RETRIES + 1):
+        try:
+            req = urllib.request.Request(url, headers=HEADERS)
+            with urllib.request.urlopen(req, timeout=30) as r:
+                return json.load(r)
+        except Exception as exc:  # netwerk of HTTP, beide zijn tijdelijk genoeg
+            last = exc
+            if attempt < RETRIES:
+                time.sleep(RETRY_WAIT)
+    raise RuntimeError(f"Ryanair-API onbereikbaar na {RETRIES} pogingen: {last}")
+
+
 def fetch_fares(o, d, start, end):
-    """Return {day: {"price": float, "dep": "HH:MM", "arr": "HH:MM"}} for days in window."""
+    """-> {vluchtdatum: {"price": float, "dep": "HH:MM", "arr": "HH:MM"}}"""
     result = {}
     for month in months_between(start, end):
-        req = urllib.request.Request(API.format(o=o, d=d, m=month), headers=HEADERS)
-        with urllib.request.urlopen(req, timeout=30) as r:
-            data = json.load(r)
-        for f in data.get("outbound", {}).get("fares", []):
+        data = _get(API.format(o=o, d=d, m=month))
+        for f in (data.get("outbound") or {}).get("fares", []):
             day = f.get("day")
             if not day or not (start <= day <= end):
                 continue
@@ -50,86 +93,117 @@ def fetch_fares(o, d, start, end):
     return result
 
 
-def cheapest(fares):
-    if not fares:
-        return None, None
-    day = min(fares, key=lambda k: fares[k]["price"])
-    return day, fares[day]
+def collect(watch):
+    """-> (data, niet_bediend). data = {dest: {"out": {...}, "ret": {...}}}"""
+    data, unserved = {}, []
+    for dest in watch["dests"]:
+        out = fetch_fares(ORIGIN, dest, watch["out_from"], watch["out_to"])
+        ret = fetch_fares(dest, ORIGIN, watch["ret_from"], watch["ret_to"])
+        if not out and not ret:
+            unserved.append(dest)
+            print(f"[{watch['id']}] {ORIGIN}-{dest}: geen directe route, overgeslagen")
+            continue
+        data[dest] = {"out": out, "ret": ret}
+    return data, unserved
 
 
-def notify(title, msg):
+def append_rows(observed_at, watch_id, data):
+    today = date.today()
+    rows = []
+    for dest, legs in data.items():
+        for leg, fares in (("out", legs["out"]), ("ret", legs["ret"])):
+            o, d = (ORIGIN, dest) if leg == "out" else (dest, ORIGIN)
+            for day, f in sorted(fares.items()):
+                rows.append({
+                    "observed_at_utc": observed_at,
+                    "watch_id": watch_id,
+                    "leg": leg,
+                    "origin": o,
+                    "dest": d,
+                    "flight_date": day,
+                    "price_eur": f"{f['price']:.2f}",
+                    "dep": f["dep"],
+                    "arr": f["arr"],
+                    "days_to_flight": (date.fromisoformat(day) - today).days,
+                })
+    if not rows:
+        return 0
+    os.makedirs(os.path.dirname(PRICES_FILE), exist_ok=True)
+    new = not os.path.exists(PRICES_FILE)
+    with open(PRICES_FILE, "a", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=COLUMNS)
+        if new:
+            w.writeheader()
+        w.writerows(rows)
+    return len(rows)
+
+
+def notify(title, msg, click):
     print(f"\n[{title}]\n{msg}")
     if not NTFY_TOPIC:
-        print("FOUT: NTFY_TOPIC is leeg, er is geen push verstuurd. Zet het repo-secret "
-              "NTFY_TOPIC op de ntfy-topicnaam (alleen de naam, geen URL).", file=sys.stderr)
+        print("FOUT: NTFY_TOPIC is leeg, er is geen push verstuurd.", file=sys.stderr)
         raise RuntimeError("NTFY_TOPIC ontbreekt")
-    # HTTP-headers gaan in latin-1 de lijn op; zo komen UTF-8 tekens zoals de euro heel aan.
+
     def h(v):
         return v.encode("utf-8").decode("latin-1")
-    req = urllib.request.Request(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode(),
-                                 headers={"Title": h(title), "Tags": "airplane",
-                                          "Click": f"https://www.ryanair.com/nl/nl/cheap-flights/{ORIGIN.lower()}-to-{DEST.lower()}"})
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            print(f"[ntfy] verstuurd naar topic '{NTFY_TOPIC}' (HTTP {r.status})")
-    except Exception as e:
-        print(f"FOUT: ntfy-call naar topic '{NTFY_TOPIC}' mislukt: {e}", file=sys.stderr)
-        raise
 
-
-def compare(label, new, old):
-    lines = []
-    for day, f in sorted(new.items()):
-        prev = old.get(day, {}).get("price")
-        if prev is not None and f["price"] < prev:
-            lines.append(f"{label} {day} {f['dep']}-{f['arr']}: €{prev:.2f} → €{f['price']:.2f}")
-    return lines
+    req = urllib.request.Request(
+        f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode(),
+        headers={"Title": h(title), "Tags": "airplane", "Click": click})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        print(f"[ntfy] verstuurd naar topic '{NTFY_TOPIC}' (HTTP {r.status})")
 
 
 def main():
+    guard_origin()
+    with open(CONFIG_FILE, encoding="utf-8") as fh:
+        watches = [w for w in json.load(fh) if w.get("active", True)]
     state = {}
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as fh:
+        with open(STATE_FILE, encoding="utf-8") as fh:
             state = json.load(fh)
 
-    out = fetch_fares(ORIGIN, DEST, OUT_FROM, OUT_TO)
-    ret = fetch_fares(DEST, ORIGIN, RET_FROM, RET_TO)
+    observed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    results, new_state = [], {}
 
-    od, of = cheapest(out)
-    rd, rf = cheapest(ret)
-    summary = []
-    if of:
-        summary.append(f"Goedkoopste heen: {od} {of['dep']}-{of['arr']} €{of['price']:.2f}")
-    if rf:
-        summary.append(f"Goedkoopste terug: {rd} {rf['dep']}-{rf['arr']} €{rf['price']:.2f}")
-    total = (of["price"] + rf["price"]) if of and rf else None
-    if total is not None:
-        summary.append(f"Retour totaal: €{total:.2f}")
+    for watch in watches:
+        data, unserved = collect(watch)
+        n = append_rows(observed_at, watch["id"], data)
+        print(f"[{watch['id']}] {n} prijsregels gelogd")
+        history = advice.load_history(PRICES_FILE, watch["id"])
+        verdict = advice.evaluate(watch, history, data, date.today())
+        verdict["unserved"] = unserved
+        results.append((watch, verdict))
+        new_state[watch["id"]] = {
+            "advice": verdict["advice"],
+            "total": verdict["current_total"],
+            "min_ever": verdict["min_ever"],
+        }
 
-    drops = compare("Heen", out, state.get("out", {})) + compare("Terug", ret, state.get("ret", {}))
-    first_run = not state
+    report.write(REPORT_FILE, observed_at, results)
 
-    if FORCE_NOTIFY:
-        body = "\n".join(drops + [""] + summary) if drops else "\n".join(summary)
-        notify(f"Testmelding prijswacht {ORIGIN}-{DEST}", body or "Nog geen prijzen beschikbaar.")
-    elif first_run:
-        notify(f"Prijswacht {ORIGIN}-{DEST} gestart", "\n".join(summary) or "Nog geen prijzen beschikbaar.")
-    elif drops:
-        notify(f"Prijsdaling {ORIGIN}-{DEST}", "\n".join(drops + [""] + summary))
-    elif TARGET and total is not None and total <= TARGET and not state.get("target_hit"):
-        notify(f"Onder doelprijs €{TARGET:.0f}", "\n".join(summary))
-    else:
-        print("Geen daling.\n" + "\n".join(summary))
+    for watch, v in results:
+        prev = state.get(watch["id"], {})
+        events = advice.notify_reasons(watch, v, prev, date.today())
+        if FORCE_NOTIFY:
+            events = events or ["Testmelding, geen bijzonderheden."]
+        if not events:
+            print(f"[{watch['id']}] {v['advice']}: {v['reason']} (geen melding)")
+            continue
+        best = v.get("best")
+        click = ("https://www.ryanair.com/nl/nl/cheap-flights/"
+                 f"{ORIGIN.lower()}-to-{(best['dest'] if best else 'gro').lower()}")
+        body = "\n".join(events + ["", v["reason"], "", *v["summary"]])
+        notify(f"{watch['id']}: {v['advice']}", body, click)
 
-    state = {"out": out, "ret": ret, "target_hit": bool(TARGET and total is not None and total <= TARGET)}
-    with open(STATE_FILE, "w") as fh:
-        json.dump(state, fh, indent=2, sort_keys=True)
+    with open(STATE_FILE, "w", encoding="utf-8") as fh:
+        json.dump(new_state, fh, indent=2, sort_keys=True)
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        print(f"FOUT: {e}", file=sys.stderr)
+    except Exception as exc:
+        print(f"FOUT: {exc}", file=sys.stderr)
         traceback.print_exc()
         sys.exit(1)

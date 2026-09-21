@@ -1,0 +1,24 @@
+[
+  {
+    "id": "kerst2026",
+    "dests": ["GRO", "BCN", "PGF", "CCF"],
+    "out_from": "2026-12-23",
+    "out_to": "2026-12-28",
+    "ret_from": "2027-01-01",
+    "ret_to": "2027-01-05",
+    "buy_by_date": "2026-10-31",
+    "target_total": 0,
+    "active": true
+  },
+  {
+    "id": "zomer2027",
+    "dests": ["GRO", "BCN", "PGF", "CCF"],
+    "out_from": "2027-06-18",
+    "out_to": "2027-06-25",
+    "ret_from": "2027-06-27",
+    "ret_to": "2027-07-04",
+    "buy_by_date": "2027-03-31",
+    "target_total": 0,
+    "active": true
+  }
+]
