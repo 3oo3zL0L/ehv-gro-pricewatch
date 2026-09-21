@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """Ryanair price watch: Eindhoven <-> Girona. Sends a push (ntfy) on price drops."""
-import json, os, sys, urllib.request
+import json, os, sys, traceback, urllib.request
 from datetime import date
 
 # ---- Config (override via env vars) ----
 ORIGIN = os.getenv("ORIGIN", "EIN")
 DEST = os.getenv("DEST", "GRO")
-OUT_FROM = os.getenv("OUT_FROM", "2026-12-24")   # heenreis venster
+OUT_FROM = os.getenv("OUT_FROM", "2026-12-24")  # heenreis venster
 OUT_TO = os.getenv("OUT_TO", "2026-12-28")
-RET_FROM = os.getenv("RET_FROM", "2027-01-01")   # terugreis venster
+RET_FROM = os.getenv("RET_FROM", "2027-01-01")  # terugreis venster
 RET_TO = os.getenv("RET_TO", "2027-01-04")
-TARGET = float(os.getenv("TARGET_TOTAL", "0"))   # optioneel: melding als retour onder dit bedrag komt
-NTFY_TOPIC = os.getenv("NTFY_TOPIC", "")
+TARGET = float(os.getenv("TARGET_TOTAL", "0"))  # optioneel: melding als retour onder dit bedrag komt
+NTFY_TOPIC = os.getenv("NTFY_TOPIC", "").strip()
+FORCE_NOTIFY = os.getenv("FORCE_NOTIFY", "").strip().lower() in ("1", "true", "yes", "on")
 STATE_FILE = os.getenv("STATE_FILE", "state.json")
 
 API = "https://services-api.ryanair.com/farfnd/v4/oneWayFares/{o}/{d}/cheapestPerDay?outboundMonthOfDate={m}&currency=EUR"
@@ -59,11 +60,21 @@ def cheapest(fares):
 def notify(title, msg):
     print(f"\n[{title}]\n{msg}")
     if not NTFY_TOPIC:
-        return
+        print("FOUT: NTFY_TOPIC is leeg, er is geen push verstuurd. Zet het repo-secret "
+              "NTFY_TOPIC op de ntfy-topicnaam (alleen de naam, geen URL).", file=sys.stderr)
+        raise RuntimeError("NTFY_TOPIC ontbreekt")
+    # HTTP-headers gaan in latin-1 de lijn op; zo komen UTF-8 tekens zoals de euro heel aan.
+    def h(v):
+        return v.encode("utf-8").decode("latin-1")
     req = urllib.request.Request(f"https://ntfy.sh/{NTFY_TOPIC}", data=msg.encode(),
-                                 headers={"Title": title, "Tags": "airplane",
+                                 headers={"Title": h(title), "Tags": "airplane",
                                           "Click": f"https://www.ryanair.com/nl/nl/cheap-flights/{ORIGIN.lower()}-to-{DEST.lower()}"})
-    urllib.request.urlopen(req, timeout=15)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            print(f"[ntfy] verstuurd naar topic '{NTFY_TOPIC}' (HTTP {r.status})")
+    except Exception as e:
+        print(f"FOUT: ntfy-call naar topic '{NTFY_TOPIC}' mislukt: {e}", file=sys.stderr)
+        raise
 
 
 def compare(label, new, old):
@@ -98,7 +109,10 @@ def main():
     drops = compare("Heen", out, state.get("out", {})) + compare("Terug", ret, state.get("ret", {}))
     first_run = not state
 
-    if first_run:
+    if FORCE_NOTIFY:
+        body = "\n".join(drops + [""] + summary) if drops else "\n".join(summary)
+        notify(f"Testmelding prijswacht {ORIGIN}-{DEST}", body or "Nog geen prijzen beschikbaar.")
+    elif first_run:
         notify(f"Prijswacht {ORIGIN}-{DEST} gestart", "\n".join(summary) or "Nog geen prijzen beschikbaar.")
     elif drops:
         notify(f"Prijsdaling {ORIGIN}-{DEST}", "\n".join(drops + [""] + summary))
@@ -116,5 +130,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"Fout: {e}", file=sys.stderr)
+        print(f"FOUT: {e}", file=sys.stderr)
+        traceback.print_exc()
         sys.exit(1)
