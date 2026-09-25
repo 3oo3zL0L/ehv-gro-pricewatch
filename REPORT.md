@@ -1,12 +1,12 @@
 # Prijswacht Eindhoven
 
-Laatste update: 2026-09-25T02:01:04Z
+Laatste update: 2026-09-25T04:01:04Z
 
 ## kerst2026
 
 **WAIT** (LOW vertrouwen)
 
-Pas 3.7 dagen historie, te weinig om een dip te herkennen. Nog 36 dagen tot je deadline van 2026-10-31.
+Pas 3.8 dagen historie, te weinig om een dip te herkennen. Nog 36 dagen tot je deadline van 2026-10-31.
 
 Heen 2026-12-23 t/m 2026-12-28, terug 2027-01-01 t/m 2027-01-05.
 
@@ -16,7 +16,7 @@ Heen 2026-12-23 t/m 2026-12-28, terug 2027-01-01 t/m 2027-01-05.
 
 Geen directe route vanaf Eindhoven: BCN, PGF, CCF.
 
-Laagste ooit gezien: **231.98** op 2026-09-21. Historie: 3.7 dagen, 46 observaties.
+Laagste ooit gezien: **231.98** op 2026-09-21. Historie: 3.8 dagen, 47 observaties.
 
 `▁▁▁▁▁`  2026-09-21 tot 2026-09-25, 234 tot 234 euro
 
