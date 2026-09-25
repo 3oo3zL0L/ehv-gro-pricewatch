@@ -1,12 +1,12 @@
 # Prijswacht Eindhoven
 
-Laatste update: 2026-09-25T14:01:19Z
+Laatste update: 2026-09-25T16:01:29Z
 
 ## kerst2026
 
 **WAIT** (LOW vertrouwen)
 
-Trend is -0.16 euro per dag, prijs zakt nog. Nog 36 dagen tot je deadline van 2026-10-31.
+Trend is -0.34 euro per dag, prijs zakt nog. Nog 36 dagen tot je deadline van 2026-10-31.
 
 Heen 2026-12-23 t/m 2026-12-28, terug 2027-01-01 t/m 2027-01-05.
 
@@ -16,7 +16,7 @@ Heen 2026-12-23 t/m 2026-12-28, terug 2027-01-01 t/m 2027-01-05.
 
 Geen directe route vanaf Eindhoven: BCN, PGF, CCF.
 
-Laagste ooit gezien: **225.98** op 2026-09-25. Historie: 4.2 dagen, 52 observaties.
+Laagste ooit gezien: **225.98** op 2026-09-25. Historie: 4.3 dagen, 53 observaties.
 
 `████▁`  2026-09-21 tot 2026-09-25, 226 tot 234 euro
 
