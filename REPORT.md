@@ -1,6 +1,6 @@
 # Prijswacht Eindhoven
 
-Laatste update: 2026-10-07T14:03:29Z
+Laatste update: 2026-10-07T16:06:16Z
 
 ## kerst2026
 
@@ -16,7 +16,7 @@ Heen 2026-12-23 t/m 2026-12-28, terug 2027-01-01 t/m 2027-01-05.
 
 Geen directe route vanaf Eindhoven: BCN, PGF, CCF.
 
-Laagste ooit gezien: **188.98** op 2026-10-07. Historie: 16.2 dagen, 185 observaties.
+Laagste ooit gezien: **188.98** op 2026-10-07. Historie: 16.3 dagen, 186 observaties.
 
 `▇▇▇▇▆▇▇▇█▅▅▅▅▅▅▆▁`  2026-09-21 tot 2026-10-07, 189 tot 236 euro
 
