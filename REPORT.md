@@ -1,10 +1,10 @@
 # Prijswacht Eindhoven
 
-Laatste update: 2026-10-12T06:05:15Z
+Laatste update: 2026-10-12T08:06:35Z
 
 ## kerst2026
 
-**BUY** (MED vertrouwen)
+**BUY** (HIGH vertrouwen)
 
 Huidige prijs zit in de goedkoopste 16% van alles wat je gezien hebt. Nog 19 dagen tot je deadline van 2026-10-31.
 
@@ -16,7 +16,7 @@ Heen 2026-12-23 t/m 2026-12-28, terug 2027-01-01 t/m 2027-01-05.
 
 Geen directe route vanaf Eindhoven: BCN, PGF, CCF.
 
-Laagste ooit gezien: **142.98** op 2026-10-08. Historie: 20.9 dagen, 241 observaties.
+Laagste ooit gezien: **142.98** op 2026-10-08. Historie: 21.0 dagen, 242 observaties.
 
 `▇▇▇▇▇▇▇▇█▆▆▆▆▆▆▇▄▁▁▂▃▂`  2026-09-21 tot 2026-10-12, 143 tot 236 euro
 
